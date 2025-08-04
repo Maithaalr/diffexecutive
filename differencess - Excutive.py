@@ -33,8 +33,8 @@ if old_file and new_file:
     df_new.columns = df_new.columns.str.strip()
 
     # محاولة التعرف على عمود الرقم الوظيفي
-    id_column_old = [col for col in df_old.columns if "الرقم" in col and "الوظيفي" in col]
-    id_column_new = [col for col in df_new.columns if "الرقم" in col and "الوظيفي" in col]
+    id_column_old = [col for col in df_old.columns if "اسم" in col and "الموظف" in col]
+    id_column_new = [col for col in df_new.columns if "اسم" in col and "الموظف" in col]
 
     if not id_column_old or not id_column_new:
         st.error("⚠️ لم يتم العثور على عمود 'الرقم الوظيفي' في أحد الملفين.")
