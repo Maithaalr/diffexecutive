@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
 st.set_page_config(page_title="تحليل النواقص", layout="wide")
 st.title("تحليل النواقص في بيانات الموظفين")
@@ -13,11 +14,11 @@ with col2:
     new_file = st.file_uploader("📁 ملف النظام الجديد (Cloud)", type=["xlsx"], key="new")
 
 if old_file and new_file:
-    # قراءة أسماء الأوراق (sheets)
+    # قراءة أسماء الأوراق
     old_sheets = pd.ExcelFile(old_file).sheet_names
     new_sheets = pd.ExcelFile(new_file).sheet_names
 
-    # اختيار الشيت
+    # اختيار الورقة
     col1, col2 = st.columns(2)
     with col1:
         old_sheet = st.selectbox("📄 اختر ورقة ERP", old_sheets, key="erp_sheet")
@@ -54,16 +55,16 @@ if old_file and new_file:
         if 'الدائرة' in df_new.columns:
             df_new = df_new[~df_new['الدائرة'].isin(excluded_departments)]
 
-        # توحيد الاسم للرقم الوظيفي للمقارنة
+        # توحيد أسماء الأعمدة للرقم الوظيفي
         df_old = df_old.rename(columns={id_col_old: "EmployeeID"})
         df_new = df_new.rename(columns={id_col_new: "EmployeeID"})
 
-        # دمج خارجي لاستخراج الموظفين المختلفين
+        # دمج خارجي لاستخراج الموظفين غير المشتركين
         outer_merged = pd.merge(df_old, df_new, on="EmployeeID", how="outer", indicator=True)
         only_in_old = outer_merged[outer_merged["_merge"] == "left_only"]
         only_in_new = outer_merged[outer_merged["_merge"] == "right_only"]
 
-        # دمج داخلي لاستخراج الفروقات بين الملفين
+        # دمج داخلي لاستخراج الفروقات
         merged = pd.merge(df_old, df_new, on="EmployeeID", how="inner", suffixes=('_old', '_new'))
 
         # استخراج الفروقات
@@ -86,16 +87,22 @@ if old_file and new_file:
                     if pd.notna(val_old) and pd.notna(val_new) and val_old != val_new:
                         differences.append((emp_id, dept, col, val_old, val_new))
 
-        # تبويبات العرض
+        # تبويبات
         tab1, tab2, tab3 = st.tabs(["📌 الموظفين فقط في ERP", "📌 الموظفين فقط في Cloud", "🔍 الفروقات بين الملفين"])
 
         with tab1:
             st.subheader("الموظفون الموجودون فقط في ملف النظام القديم (ERP)")
             if not only_in_old.empty:
-                st.dataframe(only_in_old.drop(columns=["_merge"]).reset_index(drop=True))
+                df_download1 = only_in_old.drop(columns=["_merge"]).reset_index(drop=True)
+                st.dataframe(df_download1)
+
+                buffer1 = BytesIO()
+                df_download1.to_excel(buffer1, index=False)
+                buffer1.seek(0)
+
                 st.download_button(
                     label="⬇️ تحميل Excel",
-                    data=only_in_old.to_excel(index=False),
+                    data=buffer1,
                     file_name="الموظفين_فقط_في_ERP.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
@@ -105,10 +112,16 @@ if old_file and new_file:
         with tab2:
             st.subheader("الموظفون الموجودون فقط في ملف النظام الجديد (Cloud)")
             if not only_in_new.empty:
-                st.dataframe(only_in_new.drop(columns=["_merge"]).reset_index(drop=True))
+                df_download2 = only_in_new.drop(columns=["_merge"]).reset_index(drop=True)
+                st.dataframe(df_download2)
+
+                buffer2 = BytesIO()
+                df_download2.to_excel(buffer2, index=False)
+                buffer2.seek(0)
+
                 st.download_button(
                     label="⬇️ تحميل Excel",
-                    data=only_in_new.to_excel(index=False),
+                    data=buffer2,
                     file_name="الموظفين_فقط_في_Cloud.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
@@ -129,4 +142,3 @@ if old_file and new_file:
                         st.dataframe(diff_df[diff_df['العمود'] == col].reset_index(drop=True))
             else:
                 st.info("لا توجد اختلافات بين النظامين.")
-
