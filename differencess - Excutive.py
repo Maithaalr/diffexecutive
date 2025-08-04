@@ -17,7 +17,7 @@ if old_file and new_file:
     old_sheets = pd.ExcelFile(old_file).sheet_names
     new_sheets = pd.ExcelFile(new_file).sheet_names
 
-    # اختيار الشيت وعدد الصفوف المتروكة
+    # اختيار الشيت
     col1, col2 = st.columns(2)
     with col1:
         old_sheet = st.selectbox("📄 اختر ورقة ERP", old_sheets, key="erp_sheet")
@@ -37,7 +37,7 @@ if old_file and new_file:
     id_column_new = [col for col in df_new.columns if "اسم" in col and "الموظف" in col]
 
     if not id_column_old or not id_column_new:
-        st.error("⚠️ لم يتم العثور على عمود 'الرقم الوظيفي' في أحد الملفين.")
+        st.error("⚠️ لم يتم العثور على عمود 'اسم الموظف' في أحد الملفين.")
         st.write("أعمدة ERP:", df_old.columns.tolist())
         st.write("أعمدة Cloud:", df_new.columns.tolist())
     else:
@@ -54,42 +54,26 @@ if old_file and new_file:
         if 'الدائرة' in df_new.columns:
             df_new = df_new[~df_new['الدائرة'].isin(excluded_departments)]
 
-        # دمج الملفين بناءً على الرقم الوظيفي
-        merged = pd.merge(df_old, df_new, left_on=id_col_old, right_on=id_col_new,
-                          how="inner", suffixes=('_old', '_new'))
+        # توحيد الاسم للرقم الوظيفي للمقارنة
+        df_old = df_old.rename(columns={id_col_old: "EmployeeID"})
+        df_new = df_new.rename(columns={id_col_new: "EmployeeID"})
 
-        # استخراج الفروقات بدقة
+        # دمج خارجي لاستخراج الموظفين المختلفين
+        outer_merged = pd.merge(df_old, df_new, on="EmployeeID", how="outer", indicator=True)
+        only_in_old = outer_merged[outer_merged["_merge"] == "left_only"]
+        only_in_new = outer_merged[outer_merged["_merge"] == "right_only"]
+
+        # دمج داخلي لاستخراج الفروقات بين الملفين
+        merged = pd.merge(df_old, df_new, on="EmployeeID", how="inner", suffixes=('_old', '_new'))
+
+        # استخراج الفروقات
         differences = []
         for _, row in merged.iterrows():
-            emp_id = row[id_col_old]
+            emp_id = row["EmployeeID"]
             dept = row['الدائرة_old'] if 'الدائرة_old' in row else 'غير معروف'
 
             for col in df_old.columns:
-                if col == id_col_old:
-                    continue
-                col_old = f"{col}_old"
-                col_new = f"{col}_new"
-                if col_old in merged.columns and col_new in merged.columns:
-                    val_old = row[col_old]
-                    val_new = row[col_new]
-
-                    if pd.isna(val_old) and pd.notna(val_new):
-                        differences.append((emp_id, dept, col, 'NULL', val_new))
-                    elif pd.notna(val_old) and pd.isna(val_new):
-                        differences.append((emp_id, dept, col, val_old, 'NULL'))
-                    elif pd.isna(val_old) and pd.isna(val_new):
-                        continue  # كلاهما NULL → تجاهل
-                    elif val_old != val_new:
-                        differences.append((emp_id, dept, col, val_old, val_new))
-
-        # استخراج الفروقات فقط للقيم غير الفارغة
-        differences = []
-        for _, row in merged.iterrows():
-            emp_id = row[id_col_old]
-            dept = row['الدائرة_old'] if 'الدائرة_old' in row else 'غير معروف'
-
-            for col in df_old.columns:
-                if col == id_col_old:
+                if col == "EmployeeID":
                     continue
 
                 col_old = f"{col}_old"
@@ -99,22 +83,50 @@ if old_file and new_file:
                     val_old = row[col_old]
                     val_new = row[col_new]
 
-                    #  فقط إذا كلا القيمتين موجودتين ومختلفتين
                     if pd.notna(val_old) and pd.notna(val_new) and val_old != val_new:
                         differences.append((emp_id, dept, col, val_old, val_new))
 
+        # تبويبات العرض
+        tab1, tab2, tab3 = st.tabs(["📌 الموظفين فقط في ERP", "📌 الموظفين فقط في Cloud", "🔍 الفروقات بين الملفين"])
 
+        with tab1:
+            st.subheader("الموظفون الموجودون فقط في ملف النظام القديم (ERP)")
+            if not only_in_old.empty:
+                st.dataframe(only_in_old.drop(columns=["_merge"]).reset_index(drop=True))
+                st.download_button(
+                    label="⬇️ تحميل Excel",
+                    data=only_in_old.to_excel(index=False),
+                    file_name="الموظفين_فقط_في_ERP.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.info("لا يوجد موظفون حصريون في ERP.")
 
-        if differences:
-            diff_df = pd.DataFrame(differences, columns=["الرقم الوظيفي", "الدائرة", "العمود", "القيمة القديمة", "القيمة الجديدة"])
-            st.success(f" تم العثور على {len(diff_df)} فرق في البيانات.")
+        with tab2:
+            st.subheader("الموظفون الموجودون فقط في ملف النظام الجديد (Cloud)")
+            if not only_in_new.empty:
+                st.dataframe(only_in_new.drop(columns=["_merge"]).reset_index(drop=True))
+                st.download_button(
+                    label="⬇️ تحميل Excel",
+                    data=only_in_new.to_excel(index=False),
+                    file_name="الموظفين_فقط_في_Cloud.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.info("لا يوجد موظفون حصريون في Cloud.")
 
-            # عرض تبويبات لكل عمود تغيّر
-            changed_columns = diff_df['العمود'].unique().tolist()
-            tabs = st.tabs(changed_columns)
-            for i, col in enumerate(changed_columns):
-                with tabs[i]:
-                    st.subheader(f"التغييرات في العمود: {col}")
-                    st.dataframe(diff_df[diff_df['العمود'] == col].reset_index(drop=True))
-        else:
-            st.info(" لا توجد اختلافات بين النظامين.")
+        with tab3:
+            st.subheader("الفروقات بين بيانات النظامين")
+            if differences:
+                diff_df = pd.DataFrame(differences, columns=["الرقم الوظيفي", "الدائرة", "العمود", "القيمة القديمة", "القيمة الجديدة"])
+                st.success(f"تم العثور على {len(diff_df)} فرق في البيانات.")
+
+                changed_columns = diff_df['العمود'].unique().tolist()
+                tabs = st.tabs(changed_columns)
+                for i, col in enumerate(changed_columns):
+                    with tabs[i]:
+                        st.subheader(f"التغييرات في العمود: {col}")
+                        st.dataframe(diff_df[diff_df['العمود'] == col].reset_index(drop=True))
+            else:
+                st.info("لا توجد اختلافات بين النظامين.")
+
